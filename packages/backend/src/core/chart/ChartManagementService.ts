@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: syuilo and other misskey contributors
+ * SPDX-FileCopyrightText: syuilo and misskey-project
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
@@ -58,9 +58,9 @@ export class ChartManagementService implements OnApplicationShutdown {
 	@bindThis
 	public async start() {
 		// 20分おきにメモリ情報をDBに書き込み
-		this.saveIntervalId = setInterval(() => {
+		this.saveIntervalId = setInterval(async () => {
 			for (const chart of this.charts) {
-				chart.save();
+				await chart.save();
 			}
 		}, 1000 * 60 * 20);
 	}
@@ -69,9 +69,9 @@ export class ChartManagementService implements OnApplicationShutdown {
 	public async dispose(): Promise<void> {
 		clearInterval(this.saveIntervalId);
 		if (process.env.NODE_ENV !== 'test') {
-			await Promise.all(
-				this.charts.map(chart => chart.save()),
-			);
+			for (const chart of this.charts) {
+				await chart.save();
+			}
 		}
 	}
 

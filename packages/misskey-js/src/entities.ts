@@ -1,15 +1,45 @@
 import { ModerationLogPayloads } from './consts.js';
-import { Announcement, EmojiDetailed, Page, User, UserDetailed } from './autogen/models';
+import {
+	Announcement,
+	EmojiDetailed,
+	MeDetailed,
+	Note,
+	Page,
+	Role,
+	RolePolicies,
+	User,
+	UserDetailedNotMe,
+} from './autogen/models.js';
+import type { AuthenticationResponseJSON, PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/types';
 
-export * from './autogen/entities';
-export * from './autogen/models';
+export * from './autogen/entities.js';
+export * from './autogen/models.js';
 
 export type ID = string;
 export type DateString = string;
 
+type NonNullableRecord<T> = {
+	[P in keyof T]-?: NonNullable<T[P]>;
+};
+type AllNullRecord<T> = {
+	[P in keyof T]: null;
+};
+type AllNullOrOptionalRecord<T> = {
+	[P in keyof T]: never;
+};
+
+export type PureRenote =
+	Omit<Note, 'renote' | 'renoteId' | 'reply' | 'replyId' | 'text' | 'cw' | 'files' | 'fileIds' | 'poll'>
+	& AllNullRecord<Pick<Note, 'text'>>
+	& AllNullOrOptionalRecord<Pick<Note, 'reply' | 'replyId' | 'cw' | 'poll'>>
+	& { files: []; fileIds: []; }
+	& NonNullableRecord<Pick<Note, 'renoteId'>>
+	& Pick<Note, 'renote'>; // リノート対象が削除された場合、renoteIdはあるがrenoteはnullになる
+
 export type PageEvent = {
 	pageId: Page['id'];
 	event: string;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	var: any;
 	userId: User['id'];
 	user: User;
@@ -19,7 +49,7 @@ export type ModerationLog = {
 	id: ID;
 	createdAt: DateString;
 	userId: User['id'];
-	user: UserDetailed | null;
+	user: UserDetailedNotMe;
 } & ({
 	type: 'updateServerSettings';
 	info: ModerationLogPayloads['updateServerSettings'];
@@ -96,6 +126,9 @@ export type ModerationLog = {
 	type: 'unsuspendRemoteInstance';
 	info: ModerationLogPayloads['unsuspendRemoteInstance'];
 } | {
+	type: 'updateRemoteInstanceNote';
+	info: ModerationLogPayloads['updateRemoteInstanceNote'];
+} | {
 	type: 'markSensitiveDriveFile';
 	info: ModerationLogPayloads['markSensitiveDriveFile'];
 } | {
@@ -126,11 +159,53 @@ export type ModerationLog = {
 	type: 'resolveAbuseReport';
 	info: ModerationLogPayloads['resolveAbuseReport'];
 } | {
+	type: 'forwardAbuseReport';
+	info: ModerationLogPayloads['forwardAbuseReport'];
+} | {
+	type: 'updateAbuseReportNote';
+	info: ModerationLogPayloads['updateAbuseReportNote'];
+} | {
 	type: 'unsetUserAvatar';
 	info: ModerationLogPayloads['unsetUserAvatar'];
 } | {
 	type: 'unsetUserBanner';
 	info: ModerationLogPayloads['unsetUserBanner'];
+} | {
+	type: 'createSystemWebhook';
+	info: ModerationLogPayloads['createSystemWebhook'];
+} | {
+	type: 'updateSystemWebhook';
+	info: ModerationLogPayloads['updateSystemWebhook'];
+} | {
+	type: 'deleteSystemWebhook';
+	info: ModerationLogPayloads['deleteSystemWebhook'];
+} | {
+	type: 'createAbuseReportNotificationRecipient';
+	info: ModerationLogPayloads['createAbuseReportNotificationRecipient'];
+} | {
+	type: 'updateAbuseReportNotificationRecipient';
+	info: ModerationLogPayloads['updateAbuseReportNotificationRecipient'];
+} | {
+	type: 'deleteAbuseReportNotificationRecipient';
+	info: ModerationLogPayloads['deleteAbuseReportNotificationRecipient'];
+} | {
+	type: 'deleteAccount';
+	info: ModerationLogPayloads['deleteAccount'];
+} | {
+	type: 'deletePage';
+	info: ModerationLogPayloads['deletePage'];
+} | {
+	type: 'deleteFlash';
+	info: ModerationLogPayloads['deleteFlash'];
+} | {
+	type: 'deleteGalleryPost';
+	info: ModerationLogPayloads['deleteGalleryPost'];
+} | {
+	type: 'deleteChatRoom';
+	info: ModerationLogPayloads['deleteChatRoom'];
+} | {
+	type: 'updateProxyAccountDescription';
+	info: ModerationLogPayloads['updateProxyAccountDescription'];
 });
 
 export type ServerStats = {
@@ -149,7 +224,7 @@ export type ServerStats = {
 	}
 };
 
-export type ServerStatsLog = string[];
+export type ServerStatsLog = ServerStats[];
 
 export type QueueStats = {
 	deliver: {
@@ -166,7 +241,7 @@ export type QueueStats = {
 	};
 };
 
-export type QueueStatsLog = string[];
+export type QueueStatsLog = QueueStats[];
 
 export type EmojiAdded = {
 	emoji: EmojiDetailed
@@ -183,3 +258,72 @@ export type EmojiDeleted = {
 export type AnnouncementCreated = {
 	announcement: Announcement;
 };
+
+export type SignupRequest = {
+	username: string;
+	password: string;
+	host?: string;
+	invitationCode?: string;
+	emailAddress?: string;
+	'hcaptcha-response'?: string | null;
+	'g-recaptcha-response'?: string | null;
+	'turnstile-response'?: string | null;
+	'm-captcha-response'?: string | null;
+	'testcaptcha-response'?: string | null;
+};
+
+export type SignupResponse = MeDetailed & {
+	token: string;
+};
+
+export type SignupPendingRequest = {
+	code: string;
+};
+
+export type SignupPendingResponse = {
+	id: User['id'],
+	i: string,
+};
+
+export type SigninFlowRequest = {
+	username: string;
+	password?: string;
+	token?: string;
+	credential?: AuthenticationResponseJSON;
+	'hcaptcha-response'?: string | null;
+	'g-recaptcha-response'?: string | null;
+	'turnstile-response'?: string | null;
+	'm-captcha-response'?: string | null;
+	'testcaptcha-response'?: string | null;
+};
+
+export type SigninFlowResponse = {
+	finished: true;
+	id: User['id'];
+	i: string;
+} | {
+	finished: false;
+	next: 'captcha' | 'password' | 'totp';
+} | {
+	finished: false;
+	next: 'passkey';
+	authRequest: PublicKeyCredentialRequestOptionsJSON;
+};
+
+export type SigninWithPasskeyRequest = {
+	credential?: AuthenticationResponseJSON;
+	context?: string;
+};
+
+export type SigninWithPasskeyInitResponse = {
+	option: PublicKeyCredentialRequestOptionsJSON;
+	context: string;
+};
+
+export type SigninWithPasskeyResponse = {
+	signinResponse: SigninFlowResponse & { finished: true };
+};
+
+type Values<T extends Record<PropertyKey, unknown>> = T[keyof T];
+
+export type PartialRolePolicyOverride = Partial<{ [k in keyof RolePolicies]: Omit<Values<Role['policies']>, 'value'> & { value: RolePolicies[k] } }>;

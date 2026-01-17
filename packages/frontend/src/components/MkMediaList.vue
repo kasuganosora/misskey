@@ -1,20 +1,21 @@
 <!--
-SPDX-FileCopyrightText: syuilo and other misskey contributors
+SPDX-FileCopyrightText: syuilo and misskey-project
 SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <template>
-<div ref="root">
+<div :class="$style.root">
 	<XBanner v-for="media in mediaList.filter(media => !previewable(media))" :key="media.id" :media="media"/>
 	<div v-if="mediaList.filter(media => previewable(media)).length > 0" :class="$style.container">
 		<div
 			ref="gallery"
 			:class="[
 				$style.medias,
+				...(prefer.s.showMediaListByGridInWideArea ? [$style.gridInWideArea] : []),
 				count === 1 ? [$style.n1, {
-					[$style.n116_9]: defaultStore.reactiveState.mediaListWithOneImageAppearance.value === '16_9',
-					[$style.n11_1]: defaultStore.reactiveState.mediaListWithOneImageAppearance.value === '1_1',
-					[$style.n12_3]: defaultStore.reactiveState.mediaListWithOneImageAppearance.value === '2_3',
+					[$style.n116_9]: prefer.s.mediaListWithOneImageAppearance === '16_9',
+					[$style.n11_1]: prefer.s.mediaListWithOneImageAppearance === '1_1',
+					[$style.n12_3]: prefer.s.mediaListWithOneImageAppearance === '2_3',
 				}] : count === 2 ? $style.n2 : count === 3 ? $style.n3 : count === 4 ? $style.n4 : $style.nMany,
 			]"
 		>
@@ -27,127 +28,74 @@ SPDX-License-Identifier: AGPL-3.0-only
 </div>
 </template>
 
-<script lang="ts">
-/**
- * アスペクト比算出のためにHTMLElement.clientWidthを使うが、
- * 大変重たいのでコンテナ要素とメディアリスト幅のペアをキャッシュする
- * （タイムラインごとにスクロールコンテナが存在する前提だが……）
- */
-const widthCache = new Map<Element, number>();
-
-/**
- * コンテナ要素がリサイズされたらキャッシュを削除する
- */
-const ro = new ResizeObserver(entries => {
-	for (const entry of entries) {
-		widthCache.delete(entry.target);
-	}
-});
-
-async function getClientWidthWithCache(targetEl: HTMLElement, containerEl: HTMLElement, count = 0) {
-	if (_DEV_) console.log('getClientWidthWithCache', { targetEl, containerEl, count, cache: widthCache.get(containerEl) });
-	if (widthCache.has(containerEl)) return widthCache.get(containerEl)!;
-
-	const width = targetEl.clientWidth;
-
-	if (count <= 10 && width < 64) {
-		// widthが64未満はおかしいのでリトライする
-		await new Promise(resolve => setTimeout(resolve, 50));
-		return getClientWidthWithCache(targetEl, containerEl, count + 1);
-	}
-
-	widthCache.set(containerEl, width);
-	ro.observe(containerEl);
-	return width;
-}
-</script>
-
 <script lang="ts" setup>
-import { computed, onMounted, onUnmounted, shallowRef } from 'vue';
+import { computed, onMounted, onUnmounted, useTemplateRef } from 'vue';
 import * as Misskey from 'misskey-js';
 import PhotoSwipeLightbox from 'photoswipe/lightbox';
 import PhotoSwipe from 'photoswipe';
 import 'photoswipe/style.css';
+import { FILE_TYPE_BROWSERSAFE } from '@@/js/const.js';
 import XBanner from '@/components/MkMediaBanner.vue';
 import XImage from '@/components/MkMediaImage.vue';
 import XVideo from '@/components/MkMediaVideo.vue';
 import * as os from '@/os.js';
-import { FILE_TYPE_BROWSERSAFE } from '@/const';
-import { defaultStore } from '@/store.js';
-import { getScrollContainer, getBodyScrollHeight } from '@/scripts/scroll.js';
+import { focusParent } from '@/utility/focus.js';
+import { prefer } from '@/preferences.js';
 
 const props = defineProps<{
 	mediaList: Misskey.entities.DriveFile[];
 	raw?: boolean;
 }>();
 
-const root = shallowRef<HTMLDivElement>();
-const container = shallowRef<HTMLElement | null | undefined>(undefined);
-const gallery = shallowRef<HTMLDivElement>();
+const gallery = useTemplateRef('gallery');
 const pswpZIndex = os.claimZIndex('middle');
-document.documentElement.style.setProperty('--mk-pswp-root-z-index', pswpZIndex.toString());
+window.document.documentElement.style.setProperty('--mk-pswp-root-z-index', pswpZIndex.toString());
 const count = computed(() => props.mediaList.filter(media => previewable(media)).length);
-let lightbox: PhotoSwipeLightbox | null;
+let lightbox: PhotoSwipeLightbox | null = null;
+
+let activeEl: HTMLElement | null = null;
 
 const popstateHandler = (): void => {
-	if (lightbox.pswp && lightbox.pswp.isOpen === true) {
+	if (lightbox?.pswp && lightbox.pswp.isOpen === true) {
 		lightbox.pswp.close();
 	}
 };
 
-/**
- * アスペクト比をmediaListWithOneImageAppearanceに基づいていい感じに調整する
- * aspect-ratioではなくheightを使う
- */
 async function calcAspectRatio() {
-	if (!gallery.value || !root.value) return;
+	if (!gallery.value) return;
 
-	let img = props.mediaList[0];
+	const img = props.mediaList[0];
 
 	if (props.mediaList.length !== 1 || !(img.properties.width && img.properties.height)) {
 		gallery.value.style.aspectRatio = '';
 		return;
 	}
 
-	if (!container.value) container.value = getScrollContainer(root.value);
-	const width = container.value ? await getClientWidthWithCache(root.value, container.value) : root.value.clientWidth;
-
-	const heightMin = (ratio: number) => {
-		const imgResizeRatio = width / img.properties.width;
-		const imgDrawHeight = img.properties.height * imgResizeRatio;
-		const maxHeight = width * ratio;
-		const height = Math.min(imgDrawHeight, maxHeight);
-		if (_DEV_) console.log('Image height calculated:', { width, properties: img.properties, imgResizeRatio, imgDrawHeight, maxHeight, height });
-		return `${height}px`;
+	const ratioMax = (ratio: number) => {
+		if (img.properties.width == null || img.properties.height == null) return '';
+		return `${Math.max(ratio, img.properties.width / img.properties.height).toString()} / 1`;
 	};
 
-	switch (defaultStore.state.mediaListWithOneImageAppearance) {
+	switch (prefer.s.mediaListWithOneImageAppearance) {
 		case '16_9':
-			gallery.value.style.height = heightMin(9 / 16);
+			gallery.value.style.aspectRatio = ratioMax(16 / 9);
 			break;
 		case '1_1':
-			gallery.value.style.height = heightMin(1);
+			gallery.value.style.aspectRatio = ratioMax(1 / 1);
 			break;
 		case '2_3':
-			gallery.value.style.height = heightMin(3 / 2);
+			gallery.value.style.aspectRatio = ratioMax(2 / 3);
 			break;
-		default: {
-			const maxHeight = Math.max(64, (container.value ? container.value.clientHeight : getBodyScrollHeight()) * 0.5 || 360);
-			if (width === 0 || !maxHeight) return;
-			const imgResizeRatio = width / img.properties.width;
-			const imgDrawHeight = img.properties.height * imgResizeRatio;
-			gallery.value.style.height = `${Math.max(64, Math.min(imgDrawHeight, maxHeight))}px`;
-			gallery.value.style.minHeight = 'initial';
-			gallery.value.style.maxHeight = 'initial';
+		default:
+			gallery.value.style.aspectRatio = '';
 			break;
-		}
 	}
-
-	gallery.value.style.aspectRatio = 'initial';
 }
 
 onMounted(() => {
 	calcAspectRatio();
+
+	if (gallery.value == null) return; // TSを黙らすため
 
 	lightbox = new PhotoSwipeLightbox({
 		dataSource: props.mediaList
@@ -160,8 +108,10 @@ onMounted(() => {
 					src: media.url,
 					w: media.properties.width,
 					h: media.properties.height,
-					alt: media.comment ?? media.name,
-					comment: media.comment ?? media.name,
+					// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+					alt: media.comment || media.name,
+					// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+					comment: media.comment || media.name,
 				};
 				if (media.properties.orientation != null && media.properties.orientation >= 5) {
 					[item.w, item.h] = [item.h, item.w];
@@ -189,18 +139,17 @@ onMounted(() => {
 		bgOpacity: 1,
 		showAnimationDuration: 100,
 		hideAnimationDuration: 100,
+		returnFocus: false,
 		pswpModule: PhotoSwipe,
 	});
 
-	lightbox.on('itemData', (ev) => {
-		const { itemData } = ev;
-
+	lightbox.addFilter('itemData', (itemData) => {
 		// element is children
 		const { element } = itemData;
 
-		const id = element.dataset.id;
+		const id = element?.dataset.id;
 		const file = props.mediaList.find(media => media.id === id);
-		if (!file) return;
+		if (!file) return itemData;
 
 		itemData.src = file.url;
 		itemData.w = Number(file.properties.width);
@@ -208,48 +157,60 @@ onMounted(() => {
 		if (file.properties.orientation != null && file.properties.orientation >= 5) {
 			[itemData.w, itemData.h] = [itemData.h, itemData.w];
 		}
-		itemData.msrc = file.thumbnailUrl;
-		itemData.alt = file.comment ?? file.name;
-		itemData.comment = file.comment ?? file.name;
+		itemData.msrc = file.thumbnailUrl ?? undefined;
+		// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+		itemData.alt = file.comment || file.name;
+		// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+		itemData.comment = file.comment || file.name;
 		itemData.thumbCropped = true;
+
+		return itemData;
 	});
 
 	lightbox.on('uiRegister', () => {
-		lightbox.pswp.ui.registerElement({
+		lightbox?.pswp?.ui?.registerElement({
 			name: 'altText',
-			className: 'pwsp__alt-text-container',
+			className: 'pswp__alt-text-container',
 			appendTo: 'wrapper',
-			onInit: (el, pwsp) => {
-				let textBox = document.createElement('p');
-				textBox.className = 'pwsp__alt-text _acrylic';
+			onInit: (el, pswp) => {
+				const textBox = window.document.createElement('p');
+				textBox.className = 'pswp__alt-text _acrylic';
 				el.appendChild(textBox);
 
-				pwsp.on('change', (a) => {
-					textBox.textContent = pwsp.currSlide.data.comment;
+				pswp.on('change', () => {
+					textBox.textContent = pswp.currSlide?.data.comment;
 				});
 			},
 		});
 	});
 
-	lightbox.init();
+	lightbox.on('afterInit', () => {
+		activeEl = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null;
+		focusParent(activeEl, true, true);
+		lightbox?.pswp?.element?.focus({
+			preventScroll: true,
+		});
+		window.history.pushState(null, '', '#pswp');
+	});
+
+	lightbox.on('destroy', () => {
+		focusParent(activeEl, true, false);
+		activeEl = null;
+		if (window.location.hash === '#pswp') {
+			window.history.back();
+		}
+	});
 
 	window.addEventListener('popstate', popstateHandler);
 
-	lightbox.on('beforeOpen', () => {
-		history.pushState(null, '', '#pswp');
-	});
-
-	lightbox.on('close', () => {
-		if (window.location.hash === '#pswp') {
-			history.back();
-		}
-	});
+	lightbox.init();
 });
 
 onUnmounted(() => {
 	window.removeEventListener('popstate', popstateHandler);
 	lightbox?.destroy();
 	lightbox = null;
+	activeEl = null;
 });
 
 const previewable = (file: Misskey.entities.DriveFile): boolean => {
@@ -257,13 +218,26 @@ const previewable = (file: Misskey.entities.DriveFile): boolean => {
 	// FILE_TYPE_BROWSERSAFEに適合しないものはブラウザで表示するのに不適切
 	return (file.type.startsWith('video') || file.type.startsWith('image')) && FILE_TYPE_BROWSERSAFE.includes(file.type);
 };
+
+const openGallery = () => {
+	if (props.mediaList.filter(media => previewable(media)).length > 0) {
+		lightbox?.loadAndOpen(0);
+	}
+};
+
+defineExpose({
+	openGallery,
+});
 </script>
 
 <style lang="scss" module>
+.root {
+	container-type: inline-size;
+}
+
 .container {
 	position: relative;
 	width: 100%;
-	margin-top: 4px;
 }
 
 .medias {
@@ -344,19 +318,33 @@ const previewable = (file: Misskey.entities.DriveFile): boolean => {
 	border-radius: 8px;
 }
 
+@container (min-width: 500px) {
+	.medias.gridInWideArea {
+		display: grid;
+		aspect-ratio: auto;
+		grid-template-columns: repeat(4, 1fr);
+		grid-template-rows: auto;
+		grid-gap: 8px;
+
+		> .media {
+			aspect-ratio: 1 / 1;
+		}
+	}
+}
+
 :global(.pswp) {
 	--pswp-root-z-index: var(--mk-pswp-root-z-index, 2000700) !important;
-	--pswp-bg: var(--modalBg) !important;
+	--pswp-bg: var(--MI_THEME-modalBg) !important;
 }
 </style>
 
 <style lang="scss">
 .pswp__bg {
-	background: var(--modalBg);
-	backdrop-filter: var(--modalBgFilter);
+	background: var(--MI_THEME-modalBg);
+	backdrop-filter: var(--MI-modalBgFilter);
 }
 
-.pwsp__alt-text-container {
+.pswp__alt-text-container {
 	display: flex;
 	flex-direction: row;
 	align-items: center;
@@ -370,15 +358,15 @@ const previewable = (file: Misskey.entities.DriveFile): boolean => {
 	max-width: 800px;
 }
 
-.pwsp__alt-text {
-	color: var(--fg);
+.pswp__alt-text {
+	color: var(--MI_THEME-fg);
 	margin: 0 auto;
 	text-align: center;
-	padding: var(--margin);
-	border-radius: var(--radius);
+	padding: var(--MI-margin);
+	border-radius: var(--MI-radius);
 	max-height: 8em;
 	overflow-y: auto;
-	text-shadow: var(--bg) 0 0 10px, var(--bg) 0 0 3px, var(--bg) 0 0 3px;
+	text-shadow: var(--MI_THEME-bg) 0 0 10px, var(--MI_THEME-bg) 0 0 3px, var(--MI_THEME-bg) 0 0 3px;
 	white-space: pre-line;
 }
 </style>

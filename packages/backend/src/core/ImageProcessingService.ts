@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: syuilo and other misskey contributors
+ * SPDX-FileCopyrightText: syuilo and misskey-project
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
@@ -34,6 +34,7 @@ export const webpDefault: sharp.WebpOptions = {
 	smartSubsample: true,
 	mixed: true,
 	effort: 2,
+	loop: 0,
 };
 
 export const avifDefault: sharp.AvifOptions = {

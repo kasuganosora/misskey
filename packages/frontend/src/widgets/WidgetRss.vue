@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: syuilo and other misskey contributors
+SPDX-FileCopyrightText: syuilo and misskey-project
 SPDX-License-Identifier: AGPL-3.0-only
 -->
 
@@ -11,10 +11,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 	<div class="ekmkgxbj">
 		<MkLoading v-if="fetching"/>
-		<div v-else-if="(!items || items.length === 0) && widgetProps.showHeader" class="_fullinfo">
-			<img :src="infoImageUrl" class="_ghost"/>
-			<div>{{ i18n.ts.nothing }}</div>
-		</div>
+		<MkResult v-else-if="(!items || items.length === 0) && widgetProps.showHeader" type="empty"/>
 		<div v-else :class="$style.feed">
 			<a v-for="item in items" :key="item.link" :class="$style.item" :href="item.link" rel="nofollow noopener" target="_blank" :title="item.title">{{ item.title }}</a>
 		</div>
@@ -24,34 +21,40 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { ref, watch, computed } from 'vue';
-import { useWidgetPropsManager, Widget, WidgetComponentEmits, WidgetComponentExpose, WidgetComponentProps } from './widget.js';
-import { GetFormResultType } from '@/scripts/form.js';
-import MkContainer from '@/components/MkContainer.vue';
-import { url as base } from '@/config.js';
+import * as Misskey from 'misskey-js';
+import { url as base } from '@@/js/config.js';
+import { useInterval } from '@@/js/use-interval.js';
+import { useWidgetPropsManager } from './widget.js';
 import { i18n } from '@/i18n.js';
-import { useInterval } from '@/scripts/use-interval.js';
-import { infoImageUrl } from '@/instance.js';
+import type { WidgetComponentEmits, WidgetComponentExpose, WidgetComponentProps } from './widget.js';
+import type { FormWithDefault, GetFormResultType } from '@/utility/form.js';
+import MkContainer from '@/components/MkContainer.vue';
 
 const name = 'rss';
 
 const widgetPropsDef = {
 	url: {
-		type: 'string' as const,
+		type: 'string',
+		label: i18n.ts._widgetOptions._rss.url,
 		default: 'http://feeds.afpbb.com/rss/afpbb/afpbbnews',
+		manualSave: true,
 	},
 	refreshIntervalSec: {
-		type: 'number' as const,
+		type: 'number',
+		label: i18n.ts._widgetOptions._rss.refreshIntervalSec,
 		default: 60,
 	},
 	maxEntries: {
-		type: 'number' as const,
+		type: 'number',
+		label: i18n.ts._widgetOptions._rss.maxEntries,
 		default: 15,
 	},
 	showHeader: {
-		type: 'boolean' as const,
+		type: 'boolean',
+		label: i18n.ts._widgetOptions.showHeader,
 		default: true,
 	},
-};
+} satisfies FormWithDefault;
 
 type WidgetProps = GetFormResultType<typeof widgetPropsDef>;
 
@@ -64,28 +67,28 @@ const { widgetProps, configure } = useWidgetPropsManager(name,
 	emit,
 );
 
-const rawItems = ref([]);
+const rawItems = ref<Misskey.entities.FetchRssResponse['items']>([]);
 const items = computed(() => rawItems.value.slice(0, widgetProps.maxEntries));
 const fetching = ref(true);
 const fetchEndpoint = computed(() => {
 	const url = new URL('/api/fetch-rss', base);
 	url.searchParams.set('url', widgetProps.url);
-	return url;
+	return url.toString();
 });
 const intervalClear = ref<(() => void) | undefined>();
 
 const tick = () => {
-	if (document.visibilityState === 'hidden' && rawItems.value.length !== 0) return;
+	if (window.document.visibilityState === 'hidden' && rawItems.value.length !== 0) return;
 
 	window.fetch(fetchEndpoint.value, {})
 		.then(res => res.json())
-		.then(feed => {
-			rawItems.value = feed.items ?? [];
+		.then((feed: Misskey.entities.FetchRssResponse) => {
+			rawItems.value = feed.items;
 			fetching.value = false;
 		});
 };
 
-watch(() => fetchEndpoint, tick);
+watch(fetchEndpoint, tick);
 watch(() => widgetProps.refreshIntervalSec, () => {
 	if (intervalClear.value) {
 		intervalClear.value();
@@ -112,7 +115,7 @@ defineExpose<WidgetComponentExpose>({
 .item {
 	display: block;
 	padding: 8px 16px;
-	color: var(--fg);
+	color: var(--MI_THEME-fg);
 	white-space: nowrap;
 	text-overflow: ellipsis;
 	overflow: hidden;

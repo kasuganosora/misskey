@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: syuilo and other misskey contributors
+SPDX-FileCopyrightText: syuilo and misskey-project
 SPDX-License-Identifier: AGPL-3.0-only
 -->
 
@@ -13,30 +13,35 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { Interpreter, Parser } from '@syuilo/aiscript';
-import { useWidgetPropsManager, Widget, WidgetComponentEmits, WidgetComponentExpose, WidgetComponentProps } from './widget.js';
-import { GetFormResultType } from '@/scripts/form.js';
+import { useWidgetPropsManager } from './widget.js';
+import type { WidgetComponentEmits, WidgetComponentExpose, WidgetComponentProps } from './widget.js';
+import type { FormWithDefault, GetFormResultType } from '@/utility/form.js';
 import * as os from '@/os.js';
-import { createAiScriptEnv } from '@/scripts/aiscript/api.js';
-import { $i } from '@/account.js';
+import { aiScriptReadline, createAiScriptEnv } from '@/aiscript/api.js';
+import { $i } from '@/i.js';
 import MkButton from '@/components/MkButton.vue';
+import { i18n } from '@/i18n.js';
 
 const name = 'button';
 
 const widgetPropsDef = {
 	label: {
-		type: 'string' as const,
+		type: 'string',
+		label: i18n.ts.label,
 		default: 'BUTTON',
 	},
 	colored: {
-		type: 'boolean' as const,
+		type: 'boolean',
+		label: i18n.ts._widgetOptions._button.colored,
 		default: true,
 	},
 	script: {
-		type: 'string' as const,
+		type: 'string',
+		label: i18n.ts.script,
 		multiline: true,
-		default: 'Mk:dialog("hello" "world")',
+		default: 'Mk:dialog("hello", "world")',
 	},
-};
+} satisfies FormWithDefault;
 
 type WidgetProps = GetFormResultType<typeof widgetPropsDef>;
 
@@ -51,24 +56,12 @@ const { widgetProps, configure } = useWidgetPropsManager(name,
 
 const parser = new Parser();
 
-const run = async () => {
+async function run() {
 	const aiscript = new Interpreter(createAiScriptEnv({
 		storageKey: 'widget',
 		token: $i?.token,
 	}), {
-		in: (q) => {
-			return new Promise(ok => {
-				os.inputText({
-					title: q,
-				}).then(({ canceled, result: a }) => {
-					if (canceled) {
-						ok('');
-					} else {
-						ok(a);
-					}
-				});
-			});
-		},
+		in: aiScriptReadline,
 		out: (value) => {
 			// nop
 		},
@@ -92,10 +85,10 @@ const run = async () => {
 	} catch (err) {
 		os.alert({
 			type: 'error',
-			text: err,
+			text: err instanceof Error ? err.message : String(err),
 		});
 	}
-};
+}
 
 defineExpose<WidgetComponentExpose>({
 	name,

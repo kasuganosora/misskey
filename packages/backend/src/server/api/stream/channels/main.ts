@@ -1,30 +1,34 @@
 /*
- * SPDX-FileCopyrightText: syuilo and other misskey contributors
+ * SPDX-FileCopyrightText: syuilo and misskey-project
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Scope } from '@nestjs/common';
 import { isInstanceMuted, isUserFromMutedInstance } from '@/misc/is-instance-muted.js';
 import { NoteEntityService } from '@/core/entities/NoteEntityService.js';
 import { bindThis } from '@/decorators.js';
-import Channel from '../channel.js';
+import type { JsonObject } from '@/misc/json-value.js';
+import Channel, { type ChannelRequest } from '../channel.js';
+import { REQUEST } from '@nestjs/core';
 
-class MainChannel extends Channel {
+@Injectable({ scope: Scope.TRANSIENT })
+export class MainChannel extends Channel {
 	public readonly chName = 'main';
 	public static shouldShare = true;
-	public static requireCredential = true;
+	public static requireCredential = true as const;
+	public static kind = 'read:account';
 
 	constructor(
-		private noteEntityService: NoteEntityService,
+		@Inject(REQUEST)
+		request: ChannelRequest,
 
-		id: string,
-		connection: Channel['connection'],
+		private noteEntityService: NoteEntityService,
 	) {
-		super(id, connection);
+		super(request);
 	}
 
 	@bindThis
-	public async init(params: any) {
+	public async init(params: JsonObject) {
 		// Subscribe main stream channel
 		this.subscriber.on(`mainStream:${this.user!.id}`, async data => {
 			switch (data.type) {
@@ -37,7 +41,6 @@ class MainChannel extends Channel {
 						const note = await this.noteEntityService.pack(data.body.note.id, this.user, {
 							detail: true,
 						});
-						this.connection.cacheNote(note);
 						data.body.note = note;
 					}
 					break;
@@ -50,7 +53,6 @@ class MainChannel extends Channel {
 						const note = await this.noteEntityService.pack(data.body.id, this.user, {
 							detail: true,
 						});
-						this.connection.cacheNote(note);
 						data.body = note;
 					}
 					break;
@@ -59,25 +61,5 @@ class MainChannel extends Channel {
 
 			this.send(data.type, data.body);
 		});
-	}
-}
-
-@Injectable()
-export class MainChannelService {
-	public readonly shouldShare = MainChannel.shouldShare;
-	public readonly requireCredential = MainChannel.requireCredential;
-
-	constructor(
-		private noteEntityService: NoteEntityService,
-	) {
-	}
-
-	@bindThis
-	public create(id: string, connection: Channel['connection']): MainChannel {
-		return new MainChannel(
-			this.noteEntityService,
-			id,
-			connection,
-		);
 	}
 }

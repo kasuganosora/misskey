@@ -35,12 +35,18 @@ coverage
 !/.config/example.yml
 !/.config/docker_example.yml
 !/.config/docker_example.env
+!/.config/cypress-devcontainer.yml
 docker-compose.yml
-!/.devcontainer/docker-compose.yml
+./compose.yml
+.devcontainer/compose.yml
+!/.devcontainer/compose.yml
 
 # misskey
 /build
 built
+built-test
+js-built
+src-js
 /data
 /.cache-loader
 /db
@@ -57,6 +63,14 @@ api-docs.json
 ormconfig.json
 temp
 /packages/frontend/src/**/*.stories.ts
+tsdoc-metadata.json
+misskey-assets
+
+# Vite temporary files
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+vite.config.local-dev.js.timestamp-*
+vite.config.local-dev.ts.timestamp-*
 
 # blender backups
 *.blend1
